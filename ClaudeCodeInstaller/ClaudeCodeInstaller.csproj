@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- <ApplicationIcon>app.ico</ApplicationIcon> -->
+    <AssemblyName>ClaudeCodeInstaller</AssemblyName>
+    <Company>Claude Code Community</Company>
+    <Product>Claude Code Context Menu Installer</Product>
+    <Description>Adds Claude Code to Windows Explorer context menu</Description>
+    <Version>1.0.0</Version>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\claude-code-launcher.ps1" />
+  </ItemGroup>
+
+</Project>
