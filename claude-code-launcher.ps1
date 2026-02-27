@@ -7,11 +7,55 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
+# --- Detect available terminals ---
+$terminals = [System.Collections.ArrayList]::new()
+
+# CMD (always available)
+[void]$terminals.Add(@{ Name = "CMD"; Exe = "cmd.exe"; Args = { param($cmd) @("/k", $cmd) } })
+
+# Windows PowerShell 5.1
+$winPs = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+if (Test-Path $winPs) {
+    [void]$terminals.Add(@{ Name = "Windows PowerShell"; Exe = $winPs; Args = { param($cmd) @("-NoExit", "-Command", $cmd) } })
+}
+
+# PowerShell 7+ (pwsh)
+$pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+if ($pwsh) {
+    [void]$terminals.Add(@{ Name = "PowerShell 7"; Exe = $pwsh.Source; Args = { param($cmd) @("-NoExit", "-Command", $cmd) } })
+}
+
+# Windows Terminal (wt)
+$wt = Get-Command wt.exe -ErrorAction SilentlyContinue
+if ($wt) {
+    [void]$terminals.Add(@{ Name = "Windows Terminal"; Exe = $wt.Source; Args = { param($cmd) @("-d", $FolderPath, "cmd.exe", "/k", $cmd) } })
+}
+
+# Git Bash
+$gitBashPaths = @(
+    "$env:ProgramFiles\Git\bin\bash.exe",
+    "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
+    "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe"
+)
+foreach ($gp in $gitBashPaths) {
+    if (Test-Path $gp) {
+        [void]$terminals.Add(@{ Name = "Git Bash"; Exe = $gp; Args = { param($cmd) @("-c", "cd '$($FolderPath -replace '\\','/')' && $cmd; exec bash") } })
+        break
+    }
+}
+
+# Build ComboBox items XAML
+$comboItemsXaml = ""
+for ($i = 0; $i -lt $terminals.Count; $i++) {
+    $tName = $terminals[$i].Name
+    $comboItemsXaml += "                    <ComboBoxItem Content=`"$tName`" Foreground=`"#e0e0e0`"/>`n"
+}
+
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Claude Code Launcher"
-        Width="420" Height="280"
+        Width="420" Height="340"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="#1a1a2e">
@@ -29,6 +73,7 @@ Add-Type -AssemblyName WindowsBase
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -36,14 +81,23 @@ Add-Type -AssemblyName WindowsBase
         <TextBlock Grid.Row="0" Text="Claude Code" FontSize="22" FontWeight="Bold"
                    Foreground="#c084fc" HorizontalAlignment="Center" Margin="0,0,0,5"/>
 
-        <TextBlock Grid.Row="1" Text="{Binding FolderDisplay}" FontSize="11"
-                   Foreground="#888" HorizontalAlignment="Center" Margin="0,0,0,18"
+        <TextBlock Grid.Row="1" x:Name="txtFolder" FontSize="11"
+                   Foreground="#888" HorizontalAlignment="Center" Margin="0,0,0,14"
                    TextTrimming="CharacterEllipsis" MaxWidth="340"/>
 
         <CheckBox Grid.Row="2" x:Name="chkAdmin" Content="  Modo Administrador"/>
         <CheckBox Grid.Row="3" x:Name="chkDangerous" Content="  Dangerously Skip Permissions"/>
 
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,10,0,0" VerticalAlignment="Center">
+            <TextBlock Text="Terminal:" Foreground="#e0e0e0" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <ComboBox x:Name="cmbTerminal" Width="230" Height="30" FontSize="13"
+                      SelectedIndex="0" Cursor="Hand"
+                      Background="#2a2a4a" Foreground="#e0e0e0" BorderBrush="#444">
+$comboItemsXaml
+            </ComboBox>
+        </StackPanel>
+
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0">
             <Button x:Name="btnLaunch" Content="Iniciar" Width="120" Height="36" FontSize="14"
                     FontWeight="SemiBold" Cursor="Hand" Margin="0,0,10,0">
                 <Button.Style>
@@ -104,19 +158,14 @@ Add-Type -AssemblyName WindowsBase
 $reader = (New-Object System.Xml.XmlNodeReader $xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-$chkAdmin = $window.FindName("chkAdmin")
+$chkAdmin    = $window.FindName("chkAdmin")
 $chkDangerous = $window.FindName("chkDangerous")
-$btnLaunch = $window.FindName("btnLaunch")
-$btnCancel = $window.FindName("btnCancel")
+$cmbTerminal = $window.FindName("cmbTerminal")
+$btnLaunch   = $window.FindName("btnLaunch")
+$btnCancel   = $window.FindName("btnCancel")
+$txtFolder   = $window.FindName("txtFolder")
 
-# Show truncated folder path in the subtitle
-$folderDisplay = $window.FindName("_")  # won't find, that's fine
-$subtitleBlock = $window.Content.Children | Where-Object {
-    $_ -is [System.Windows.Controls.TextBlock] -and $_.FontSize -eq 11
-}
-if ($subtitleBlock) {
-    $subtitleBlock.Text = $FolderPath
-}
+$txtFolder.Text = $FolderPath
 
 $btnCancel.Add_Click({
     $window.Close()
@@ -125,25 +174,52 @@ $btnCancel.Add_Click({
 $btnLaunch.Add_Click({
     $runAsAdmin = $chkAdmin.IsChecked
     $skipPerms  = $chkDangerous.IsChecked
+    $selectedIdx = $cmbTerminal.SelectedIndex
 
-    $cmdArgs = "claude"
+    $terminal = $terminals[$selectedIdx]
+
+    $claudeCmd = "claude"
     if ($skipPerms) {
-        $cmdArgs = "claude --dangerously-skip-permissions"
+        $claudeCmd = "claude --dangerously-skip-permissions"
     }
 
-    # Build the command that will run inside the terminal
-    $terminalCmd = "cd /d `"$FolderPath`" && $cmdArgs"
+    # Build the shell command depending on terminal type
+    $terminalName = $terminal.Name
+
+    if ($terminalName -eq "CMD") {
+        $shellCmd = "cd /d `"$FolderPath`" && $claudeCmd"
+    }
+    elseif ($terminalName -eq "Git Bash") {
+        $folderUnix = $FolderPath -replace '\\','/'
+        $shellCmd = "cd '$folderUnix' && $claudeCmd; exec bash"
+    }
+    elseif ($terminalName -eq "Windows Terminal") {
+        # Windows Terminal handles -d for directory; inner command is cmd
+        $shellCmd = "cd /d `"$FolderPath`" && $claudeCmd"
+    }
+    else {
+        # PowerShell variants
+        $shellCmd = "Set-Location -LiteralPath '$FolderPath'; $claudeCmd"
+    }
+
+    # Build argument list via the terminal's Args scriptblock
+    $argList = & $terminal.Args $shellCmd
+
+    $processArgs = @{
+        FilePath     = $terminal.Exe
+        ArgumentList = $argList
+    }
 
     if ($runAsAdmin) {
+        $processArgs["Verb"] = "RunAs"
+    }
+
+    # Windows Terminal with admin needs special handling
+    if ($terminalName -eq "Windows Terminal" -and $runAsAdmin) {
         $processArgs = @{
-            FilePath     = "cmd.exe"
-            ArgumentList = "/k", $terminalCmd
+            FilePath     = $terminal.Exe
+            ArgumentList = @("-d", $FolderPath, "cmd.exe", "/k", $shellCmd)
             Verb         = "RunAs"
-        }
-    } else {
-        $processArgs = @{
-            FilePath     = "cmd.exe"
-            ArgumentList = "/k", $terminalCmd
         }
     }
 

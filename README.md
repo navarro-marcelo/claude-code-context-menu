@@ -11,6 +11,7 @@ Adds a **"Claude Code"** option to the Windows Explorer right-click menu on fold
 - GUI launcher with options:
   - **Modo Administrador** — opens elevated terminal
   - **Dangerously Skip Permissions** — runs with `--dangerously-skip-permissions`
+  - **Terminal selector** — pick CMD, Windows PowerShell, PowerShell 7, Windows Terminal, or Git Bash (only shows what's installed on your machine)
 - Works on folder items AND inside folders (background click)
 - One-click installer (.exe) with install/uninstall GUI
 - Alternative PowerShell scripts for environments without .NET

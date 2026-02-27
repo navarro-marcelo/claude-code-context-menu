@@ -47,12 +47,20 @@ Each registry key contains:
 When the user right-clicks a folder and selects "Claude Code":
 
 1. Windows Explorer passes the folder path via `%V` to the PowerShell launcher
-2. The launcher creates a **WPF window** with:
+2. **Terminal detection** runs at startup — probes the system for available terminals:
+   - **CMD** (`cmd.exe`) — always available
+   - **Windows PowerShell 5.1** — detected via `$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe`
+   - **PowerShell 7+** (`pwsh`) — detected via `Get-Command pwsh`
+   - **Windows Terminal** (`wt.exe`) — detected via `Get-Command wt.exe`
+   - **Git Bash** — detected by probing known install paths (`Program Files\Git\bin\bash.exe`, etc.)
+   Only terminals found on the machine appear in the dropdown.
+3. The launcher creates a **WPF window** with:
    - **Checkbox: "Modo Administrador"** — opens terminal with `RunAs` verb (UAC elevation)
    - **Checkbox: "Dangerously Skip Permissions"** — appends `--dangerously-skip-permissions` flag
-3. On "Iniciar" click:
-   - Builds the command: `cd /d "<folder>" && claude [--dangerously-skip-permissions]`
-   - Launches `cmd.exe /k` with the command (keeps terminal open)
+   - **Dropdown: "Terminal"** — lets the user pick which terminal to use
+4. On "Iniciar" click:
+   - Builds a shell command appropriate for the selected terminal (e.g. `cd /d` for CMD, `Set-Location` for PowerShell, `cd` for Bash)
+   - Launches the selected terminal executable with correct arguments
    - If admin mode is checked, uses `Start-Process -Verb RunAs`
 
 ### 3. The .exe Installer (C# WinForms)
@@ -68,6 +76,7 @@ The `.exe` is a self-contained Windows Forms application that:
 ## Key Technical Decisions
 
 - **WPF for launcher GUI**: Chosen over WinForms because PowerShell has native WPF support via `PresentationFramework`, allowing a modern-looking dark-themed UI without external dependencies.
+- **Dynamic terminal detection**: The launcher probes the system at runtime for available terminals (CMD, Windows PowerShell, PowerShell 7, Windows Terminal, Git Bash) and only shows what's installed. Each terminal type has its own command-building logic (e.g. `cd /d` for CMD vs `Set-Location` for PowerShell vs Unix `cd` for Git Bash).
 - **cmd.exe /k for terminal**: Keeps the terminal window open after Claude Code exits, so users can see output. Using `/k` instead of `/c` prevents the window from closing.
 - **Registry-based context menu**: Uses `HKLM` (machine-wide) instead of `HKCU` (per-user) so the context menu appears for all users on the machine. Requires admin rights.
 - **Two registry paths**: `Directory\shell` handles right-clicking ON a folder; `Directory\Background\shell` handles right-clicking INSIDE a folder (on the background).
